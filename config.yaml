@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=./node_modules/envio/evm.schema.json
+name: envio-indexer
+networks:
+- id: 1
+  start_block: 0
+  contracts:
+  - name: ICHIVaultFactory
+    address:
+    - 0x5a40DFaF8C1115196A1CDF529F97122030F26112
+    handler: src/EventHandlers.ts
+    events:
+    - event: ICHIVaultCreated(address indexed sender, address ichiVault, address tokenA, bool allowTokenA, address tokenB, bool allowTokenB, uint24 fee, uint256 count)
+    - event: OwnershipTransferred(address indexed previousOwner, address indexed newOwner)
+  - name: ICHIVault
+    handler: src/EventHandlers.ts
+    events:
+    - event: Affiliate(address indexed sender, address affiliate)
+    - event: Approval(address indexed owner, address indexed spender, uint256 value)
+    - event: DeployICHIVault(address indexed sender, address pool, bool allowToken0, bool allowToken1, address owner, uint32 twapPeriod)
+    - event: Deposit(address indexed sender, address indexed to, uint256 shares, uint256 amount0, uint256 amount1)
+    - event: DepositMax(address indexed sender, uint256 deposit0Max, uint256 deposit1Max)
+    - event: Hysteresis(address indexed sender, uint256 hysteresis)
+    - event: MaxTotalSupply(address indexed sender, uint256 maxTotalSupply)
+    - event: OwnershipTransferred(address indexed previousOwner, address indexed newOwner)
+    - event: Rebalance(int24 tick, uint256 totalAmount0, uint256 totalAmount1, uint256 feeAmount0, uint256 feeAmount1, uint256 totalSupply)
+    - event: SetTwapPeriod(address indexed sender, uint32 newTwapPeriod)
+    - event: Transfer(address indexed from, address indexed to, uint256 value)
+    - event: Withdraw(address indexed sender, address indexed to, uint256 shares, uint256 amount0, uint256 amount1)
+unordered_multichain_mode: true

@@ -1,0 +1,162 @@
+type ICHIVaultFactory_ICHIVaultCreated {
+  id: ID!
+  sender: String!
+  ichiVault: String!
+  tokenA: String!
+  allowTokenA: Boolean!
+  tokenB: String!
+  allowTokenB: Boolean!
+  fee: BigInt!
+  count: BigInt!
+}
+
+type ICHIVaultFactory_OwnershipTransferred {
+  id: ID!
+  previousOwner: String!
+  newOwner: String!
+}
+
+type IchiVault @entity {
+  id: ID! # the address of the ichi vault
+  sender: String! # the address of the signer of the transaction, usually the gnosis vault
+  tokenA: String! # the address of the token contract that is token0 in the vault
+  allowTokenA: Boolean! # determines if the liquidity provision is one-side or two-sided.
+  tokenB: String! # the address of the token contract tat is token1 in the vault
+  allowTokenB: Boolean! # determines if the liquidity provision is one-side or two-sided.
+  count: BigInt! # the number of vaults that have been created to date
+  fee: BigInt! # the fee as a percentage of the uniswap swap fees to be distributed to feeRecipient and affiliate accounts
+  createdAtTimestamp: BigInt! # the timestamp at which the vault was created
+  holdersCount: Int! # number of vault LP holders
+}
+
+type User @entity {
+  id: ID!
+  vaultShares: [VaultShare!]! @derivedFrom(field: "user")
+}
+
+type VaultShare @entity {
+  id: ID!
+  user: User!
+  vault: IchiVault!
+  vaultShareBalance: BigDecimal!
+}
+
+type VaultAffiliate @entity {
+  id: ID! # the transaction hash and the log index separated by a hyphen
+  vault: String! # the address of the vault in which the affiliate was set
+  sender: String! # the address of the signer of the transaction
+  affiliate: String! # the address of the new affiliate that will receive a split of the trading fees
+}
+
+type VaultApproval @entity {
+  id: ID! # the transaction hash and the log index separated by a hyphen
+  vault: String! # the address of the vault in which the approval occurred
+  owner: String! # the address of the owner of the spender account
+  spender: String! # the address for which the allowance is being set
+  value: BigInt! # the new allowance
+}
+
+type DeployICHIVault @entity {
+  id: ID! # the transaction hash and the log index separated by a hyphen
+  vault: ID! # the address of the vault that was deployed
+  sender: String! # the address of the signer, usually the ICHIVaultFactory
+  pool: String! # the address of the UniswapV3 pool that contains the assets in the vault
+  allowToken0: Boolean! # determines if the liquidity provision is one-side or two-sided.
+  allowToken1: Boolean! # determines if the liquidity provision is one-side or two-sided.
+  owner: String! # the owner of the ichi vault
+  twapPeriod: BigInt! # the average time period
+}
+
+type VaultDeposit @entity {
+  id: ID! # the transaction hash and the log index separated by a hyphen
+  vault: String! # the address of the pool in which the deposit occurred
+  sender: String! # the signer of the deposit transaction
+  to: String! # the address to which liquidity pool tokens are minted
+  shares: BigInt! # the quantity of liquidity tokens minted as a result of deposit
+  amount0: BigInt! # the amount of token0 to be deposited
+  amount1: BigInt! # the amount of token1 to be deposited
+  tick: Int! # the current price tick
+  createdAtTimestamp: BigInt! # the timestamp at which the deposit occurred
+  sqrtPrice: BigInt! # The sqrtPrice at that moment in the pool that corresponds to the vault
+  totalAmount0: BigInt! # the total amount of token0 in the vault after the event has occurred
+  totalAmount1: BigInt! # the total amount of token1 in the vault after the event has occurred
+  totalAmount0BeforeEvent: BigInt! # the total amount of token0 in the vault before the event has occurred
+  totalAmount1BeforeEvent: BigInt! # the total amount of token1 in the vault before the event has occurred
+  totalSupply: BigInt! # the total supply of the liquidity pool token that is used by the vault
+}
+
+type VaultDepositMax @entity {
+  id: ID! # the transaction hash and the log index separated by a hyphen
+  vault: String! # the address of the pool in which the DepositMax was set
+  sender: String! # the address of the signer of the transaction that set the depoist max
+  deposit0Max: BigInt! # the depositMax amount of token0
+  deposit1Max: BigInt! # the depositMax amount of token1
+}
+
+type VaultHysteresis @entity {
+  id: ID! # the transaction hash and the log index separated by a hyphen
+  vault: String! # the address of the pool in which the hysteresis was set
+  sender: String! # the address of the signer of the transaction
+  hysteresis: BigInt! # the new hysteresis threshold in percentage
+}
+
+type MaxTotalSupply @entity {
+  id: ID! # the transaction hash and the log index separated by a hyphen
+  vault: String! # the address of the vault in which the MaxTotalSupply was set
+  sender: String! # the address of signer of the transaction
+  maxTotalSupply: BigInt! # the amount that is set as the maxTotalSupply
+}
+
+type VaultOwnershipTransferred @entity {
+  id: ID! # the transaction hash and the log index separated by a hyphen
+  vault: String! # the address of the vault in which the ownership has been transferred
+  previousOwner: String! # the address of the previous owner
+  newOwner: String! # the address of the new owner
+}
+
+type VaultRebalance @entity {
+  id: ID! # the transaction hash and the log index separated by a hyphen
+  vault: String! # the vault in which the rebalance has occurred
+  tick: Int! # the current price tick
+  createdAtTimestamp: BigInt! # the timestamp at which the vault was created
+  sqrtPrice: BigInt! # The sqrtPrice at that moment in the pool that corresponds to the vault
+  totalAmount0: BigInt! # the total amount of token0 in the vault
+  totalAmount1: BigInt! # the total amount of token1 in the vault
+  feeAmount0: BigInt! # the fees for token0
+  feeAmount1: BigInt! # the fees for token1
+  totalSupply: BigInt! # the total supply of the liquidity pool token that is used by the vault
+}
+
+type VaultSetTwapPeriod @entity {
+  id: ID! # the transaction hash and the log index separated by a hyphen
+  vault: String! # the vault in which the twap period has been set
+  sender: String! # the address that was the signer of the transaction
+  newTwapPeriod: BigInt! # the new twap period of the vault
+}
+
+type VaultTransfer @entity {
+  id: ID! # the transaction hash and the log index separated by a hyphen
+  vault: String! # the address of the vault in which the transfer has occurred
+  from: String! # the address that is the sender of the token
+  to: String! # the address that is the recipient of the transfer
+  value: BigInt! # the amount of the token that is transferred.
+}
+
+type VaultWithdraw @entity {
+  id: ID! # the transaction hash and the log index separated by a hyphen
+  vault: String! # the address of the vault in which the transfer has occurred
+  sender: String! # the signer of the transaction in which the withdraw occurred
+  to: String! # the address to which the liquidity tokens are minted
+  shares: BigInt! # the quantity of liquidity tokens minted as a result of a withdraw
+  amount0: BigInt! # the amount of token0 that is being withdrawn
+  amount1: BigInt! # the amount of token1 that is being withdrawn
+  tick: Int! # the current price tick
+  createdAtTimestamp: BigInt! # the timestamp at which the withdraw occurred
+  sqrtPrice: BigInt! # the sqrt price of the pool that the vault is deployed in at the time of the event
+  totalAmount0: BigInt! # the total amount of token0 in the vault after the event
+  totalAmount1: BigInt! # the total amount of token1 in the vault after the event
+  totalAmount0BeforeEvent: BigInt! # the total amount of token0 in the vault after the event
+  totalAmount1BeforeEvent: BigInt! # the total amount of token1 in the vault after the event
+  totalSupply: BigInt! # the total supply of the liquidity pool token that is used by the vault
+}
+
