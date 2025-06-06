@@ -25,6 +25,133 @@ import {
 
 import { ADDRESS_ZERO, BI_18, ZERO_BD, createUser, createVaultShare, convertTokenToDecimal } from "./helpers";
 
+// Import viem at the top level as recommended by Envio docs
+import { createPublicClient, http, getContract } from 'viem';
+import { mainnet, polygon, arbitrum, base, optimism } from 'viem/chains';
+
+// Import ABIs from organized folder structure
+import { VAULT_ABI, POOL_ABI } from './abis';
+
+// Create public client helper - following Envio's external calls pattern
+function createViemClient(chainId: number) {
+  let chain;
+  switch (chainId) {
+    case 1:
+      chain = mainnet;
+      break;
+    case 137:
+      chain = polygon;
+      break;
+    case 42161:
+      chain = arbitrum;
+      break;
+    case 8453:
+      chain = base;
+      break;
+    case 10:
+      chain = optimism;
+      break;
+    default:
+      chain = mainnet; // fallback
+  }
+  
+  return createPublicClient({
+    chain,
+    transport: http() // Uses default public RPC endpoints - add custom RPC for production
+  });
+}
+
+
+
+// Helper function for fetching vault data - following Envio's external calls pattern
+async function fetchVaultData(vaultAddress: string, chainId: number, context: any) {
+  try {
+    const client = createViemClient(chainId);
+    
+    const vaultContract = getContract({
+      address: vaultAddress as `0x${string}`,
+      abi: VAULT_ABI,
+      client
+    });
+
+    // Fetch vault data
+    const [tick, totalAmounts, totalSupply, poolAddress] = await Promise.all([
+      vaultContract.read.currentTick(),
+      vaultContract.read.getTotalAmounts(),
+      vaultContract.read.totalSupply(),
+      vaultContract.read.pool()
+    ]);
+
+    // Fetch pool data
+    const poolContract = getContract({
+      address: poolAddress,
+      abi: POOL_ABI,
+      client
+    });
+    
+    const slot0 = await poolContract.read.slot0();
+    
+    return {
+      tick: Number(tick),
+      totalAmount0: totalAmounts[0],
+      totalAmount1: totalAmounts[1],
+      totalSupply,
+      sqrtPrice: slot0[0], // sqrtPriceX96
+      success: true
+    };
+  } catch (error) {
+    context.log.warn(`Failed to fetch vault data for ${vaultAddress} on chain ${chainId}: ${error}`);
+    return {
+      tick: 0,
+      totalAmount0: BigInt(0),
+      totalAmount1: BigInt(0),
+      totalSupply: BigInt(0),
+      sqrtPrice: BigInt(0),
+      success: false
+    };
+  }
+}
+
+// Helper function to safely calculate before amounts - prevents negative values
+function calculateBeforeAmounts(
+  currentTotal0: bigint,
+  currentTotal1: bigint,
+  eventAmount0: bigint,
+  eventAmount1: bigint,
+  isDeposit: boolean,
+  context: any,
+  eventId: string
+) {
+  let beforeAmount0: bigint;
+  let beforeAmount1: bigint;
+
+  if (isDeposit) {
+    // For deposits: before = current - deposited
+    beforeAmount0 = currentTotal0 - eventAmount0;
+    beforeAmount1 = currentTotal1 - eventAmount1;
+  } else {
+    // For withdrawals: before = current + withdrawn
+    beforeAmount0 = currentTotal0 + eventAmount0;
+    beforeAmount1 = currentTotal1 + eventAmount1;
+  }
+
+  // Validate amounts are not negative (which doesn't make sense for token amounts)
+  if (beforeAmount0 < 0n) {
+    context.log.warn(`Calculated negative beforeAmount0 (${beforeAmount0.toString()}) for ${eventId}, setting to 0`);
+    beforeAmount0 = BigInt(0);
+  }
+  
+  if (beforeAmount1 < 0n) {
+    context.log.warn(`Calculated negative beforeAmount1 (${beforeAmount1.toString()}) for ${eventId}, setting to 0`);
+    beforeAmount1 = BigInt(0);
+  }
+
+  return {
+    totalAmount0BeforeEvent: beforeAmount0,
+    totalAmount1BeforeEvent: beforeAmount1
+  };
+}
+
 // ICHIVaultFactory event handlers
 ICHIVaultFactory.ICHIVaultCreated.handler(async ({ event, context }) => {
   const entity: ICHIVaultFactory_ICHIVaultCreated = {
@@ -113,138 +240,42 @@ ICHIVault.DeployICHIVault.handler(async ({ event, context }) => {
 });
 
 ICHIVault.Deposit.handler(async ({ event, context }) => {
-  // Initialize default values
-  let tick = 0;
-  let sqrtPrice = BigInt(0);
-  let totalAmount0 = BigInt(0);
-  let totalAmount1 = BigInt(0);
-  let totalAmount0BeforeEvent = BigInt(0);
-  let totalAmount1BeforeEvent = BigInt(0);
-  let totalSupply = BigInt(0);
-
-  try {
-    // Import viem for contract calls
-    const { createPublicClient, http, getContract } = await import('viem');
-    const { mainnet } = await import('viem/chains');
-    
-    // Create a public client - you can add your own RPC endpoint here for better reliability
-    const client = createPublicClient({
-      chain: mainnet,
-      transport: http() // Uses the default public RPC endpoints
-    });
-
-    // ICHIVault contract ABI for the view functions we need
-    const vaultABI = [
-      {
-        inputs: [],
-        name: "currentTick",
-        outputs: [{ internalType: "int24", name: "", type: "int24" }],
-        stateMutability: "view",
-        type: "function"
-      },
-      {
-        inputs: [],
-        name: "getTotalAmounts", 
-        outputs: [
-          { internalType: "uint256", name: "total0", type: "uint256" },
-          { internalType: "uint256", name: "total1", type: "uint256" }
-        ],
-        stateMutability: "view",
-        type: "function"
-      },
-      {
-        inputs: [],
-        name: "totalSupply",
-        outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
-        stateMutability: "view",
-        type: "function"
-      },
-      {
-        inputs: [],
-        name: "pool",
-        outputs: [{ internalType: "address", name: "", type: "address" }],
-        stateMutability: "view",
-        type: "function"
-      }
-    ] as const;
-    
-    const poolABI = [
-      {
-        inputs: [],
-        name: "slot0",
-        outputs: [
-          { internalType: "uint160", name: "sqrtPriceX96", type: "uint160" },
-          { internalType: "int24", name: "tick", type: "int24" },
-          { internalType: "uint16", name: "observationIndex", type: "uint16" },
-          { internalType: "uint16", name: "observationCardinality", type: "uint16" },
-          { internalType: "uint16", name: "observationCardinalityNext", type: "uint16" },
-          { internalType: "uint8", name: "feeProtocol", type: "uint8" },
-          { internalType: "bool", name: "unlocked", type: "bool" }
-        ],
-        stateMutability: "view",
-        type: "function"
-      }
-    ] as const;
-
-    // Get the vault contract
-    const vaultContract = getContract({
-      address: event.srcAddress as `0x${string}`,
-      abi: vaultABI,
-      client
-    });
-
-    // Get current tick from vault
-    tick = await vaultContract.read.currentTick();
-    
-    // Get total amounts from vault
-    const totalAmounts = await vaultContract.read.getTotalAmounts();
-    totalAmount0 = totalAmounts[0];
-    totalAmount1 = totalAmounts[1];
-    
-    // Get total supply
-    totalSupply = await vaultContract.read.totalSupply();
-    
-    // Get pool address and fetch sqrtPrice
-    const poolAddress = await vaultContract.read.pool();
-    const poolContract = getContract({
-      address: poolAddress,
-      abi: poolABI,
-      client
-    });
-    
-    const slot0 = await poolContract.read.slot0();
-    sqrtPrice = slot0[0]; // sqrtPriceX96
-    
-    // Calculate before amounts using actual values
-    totalAmount0BeforeEvent = totalAmount0 - event.params.amount0;
-    totalAmount1BeforeEvent = totalAmount1 - event.params.amount1;
-    
-    context.log.info(`Successfully fetched contract data for deposit ${event.chainId}_${event.block.number}_${event.logIndex} - sqrtPrice: ${sqrtPrice.toString()}`);
-    
-  } catch (error) {
-    context.log.warn(`Failed to fetch contract data for deposit ${event.chainId}_${event.block.number}_${event.logIndex}: ${error}`);
-    // Use default values if contract calls fail
-    totalAmount0BeforeEvent = totalAmount0 - event.params.amount0;
-    totalAmount1BeforeEvent = totalAmount1 - event.params.amount1;
+  // Fetch vault data using the helper function - follows Envio's external calls pattern
+  const vaultData = await fetchVaultData(event.srcAddress, event.chainId, context);
+  
+  // Calculate before amounts safely - prevents negative values
+  const eventId = `${event.chainId}_${event.block.number}_${event.logIndex}`;
+  const beforeAmounts = calculateBeforeAmounts(
+    vaultData.totalAmount0,
+    vaultData.totalAmount1,
+    event.params.amount0,
+    event.params.amount1,
+    true, // isDeposit
+    context,
+    eventId
+  );
+  
+  if (vaultData.success) {
+    context.log.info(`Successfully fetched contract data for deposit ${eventId} - sqrtPrice: ${vaultData.sqrtPrice.toString()}`);
   }
 
   // Create the event entity with enriched data
   const entity: VaultDeposit = {
-    id: `${event.chainId}_${event.block.number}_${event.logIndex}`,
+    id: eventId,
     vault: event.srcAddress,
     sender: event.params.sender,
     to: event.params.to,
     shares: event.params.shares,
     amount0: event.params.amount0,
     amount1: event.params.amount1,
-    tick: tick,
+    tick: vaultData.tick,
     createdAtTimestamp: BigInt(event.block.timestamp),
-    sqrtPrice: sqrtPrice, // Now fetched from actual contract call!
-    totalAmount0: totalAmount0,
-    totalAmount1: totalAmount1,
-    totalAmount0BeforeEvent: totalAmount0BeforeEvent,
-    totalAmount1BeforeEvent: totalAmount1BeforeEvent,
-    totalSupply: totalSupply,
+    sqrtPrice: vaultData.sqrtPrice,
+    totalAmount0: vaultData.totalAmount0,
+    totalAmount1: vaultData.totalAmount1,
+    totalAmount0BeforeEvent: beforeAmounts.totalAmount0BeforeEvent,
+    totalAmount1BeforeEvent: beforeAmounts.totalAmount1BeforeEvent,
+    totalSupply: vaultData.totalSupply,
   };
 
   context.VaultDeposit.set(entity);
@@ -296,50 +327,20 @@ ICHIVault.OwnershipTransferred.handler(async ({ event, context }) => {
 });
 
 ICHIVault.Rebalance.handler(async ({ event, context }) => {
-  // Initialize default values
-  let currentTick = Number(event.params.tick); // Use event tick as default
-  let sqrtPrice = BigInt(0);
-
-  try {
-    // Use ethers.js-style contract calls as Envio supports reading contract data
-    const { ethers } = require('ethers');
-    
-    // ICHIVault contract ABI for the view functions we need
-    const vaultABI = [
-      "function currentTick() external view returns (int24)",
-      "function pool() external view returns (address)"
-    ];
-    
-    const poolABI = [
-      "function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)"
-    ];
-
-    // Note: In a real Envio implementation, you'd use the actual RPC endpoint from your config
-    // This is a conceptual implementation showing how contract calls would work
-    
-    // Get current tick from vault
-    // currentTick = await vaultContract.currentTick();
-    
-    // Get pool address and fetch sqrtPrice
-    // const poolAddress = await vaultContract.pool();
-    // const poolContract = new ethers.Contract(poolAddress, poolABI, provider);
-    // const slot0 = await poolContract.slot0();
-    // sqrtPrice = slot0[0]; // sqrtPriceX96
-    
-    console.log(`Contract data fetched for rebalance ${event.chainId}_${event.block.number}_${event.logIndex}`);
-    
-  } catch (error) {
-    context.log.warn(`Failed to fetch contract data for rebalance ${event.chainId}_${event.block.number}_${event.logIndex}: ${error}`);
-    // Use default values if contract calls fail
+  // Fetch vault data using the helper function - follows Envio's external calls pattern
+  const vaultData = await fetchVaultData(event.srcAddress, event.chainId, context);
+  
+  if (vaultData.success) {
+    context.log.info(`Successfully fetched contract data for rebalance ${event.chainId}_${event.block.number}_${event.logIndex} - sqrtPrice: ${vaultData.sqrtPrice.toString()}`);
   }
 
   // Create the event entity with enriched data
   const entity: VaultRebalance = {
     id: `${event.chainId}_${event.block.number}_${event.logIndex}`,
     vault: event.srcAddress,
-    tick: currentTick,
+    tick: vaultData.tick,
     createdAtTimestamp: BigInt(event.block.timestamp),
-    sqrtPrice: sqrtPrice,
+    sqrtPrice: vaultData.sqrtPrice,
     totalAmount0: event.params.totalAmount0,
     totalAmount1: event.params.totalAmount1,
     feeAmount0: event.params.feeAmount0,
@@ -480,79 +481,42 @@ ICHIVault.Transfer.handler(async ({ event, context }) => {
 });
 
 ICHIVault.Withdraw.handler(async ({ event, context }) => {
-  // Initialize default values
-  let tick = 0;
-  let sqrtPrice = BigInt(0);
-  let totalAmount0 = BigInt(0);
-  let totalAmount1 = BigInt(0);
-  let totalAmount0BeforeEvent = BigInt(0);
-  let totalAmount1BeforeEvent = BigInt(0);
-  let totalSupply = BigInt(0);
-
-  try {
-    // Use ethers.js-style contract calls as Envio supports reading contract data
-    const { ethers } = require('ethers');
-    
-    // ICHIVault contract ABI for the view functions we need
-    const vaultABI = [
-      "function currentTick() external view returns (int24)",
-      "function getTotalAmounts() external view returns (uint256 total0, uint256 total1)",
-      "function totalSupply() external view returns (uint256)",
-      "function pool() external view returns (address)"
-    ];
-    
-    const poolABI = [
-      "function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)"
-    ];
-
-    // Note: In a real Envio implementation, you'd use the actual RPC endpoint from your config
-    // This is a conceptual implementation showing how contract calls would work
-    
-    // Get current tick from vault
-    // tick = await vaultContract.currentTick();
-    
-    // Get total amounts from vault
-    // const totalAmounts = await vaultContract.getTotalAmounts();
-    // totalAmount0 = totalAmounts[0];
-    // totalAmount1 = totalAmounts[1];
-    
-    // Get total supply
-    // totalSupply = await vaultContract.totalSupply();
-    
-    // Get pool address and fetch sqrtPrice
-    // const poolAddress = await vaultContract.pool();
-    // const poolContract = new ethers.Contract(poolAddress, poolABI, provider);
-    // const slot0 = await poolContract.slot0();
-    // sqrtPrice = slot0[0]; // sqrtPriceX96
-    
-    // Calculate before amounts (for withdraw, add back the withdrawn amounts)
-    totalAmount0BeforeEvent = totalAmount0 + event.params.amount0;
-    totalAmount1BeforeEvent = totalAmount1 + event.params.amount1;
-    
-    console.log(`Contract data fetched for withdraw ${event.chainId}_${event.block.number}_${event.logIndex}`);
-    
-  } catch (error) {
-    context.log.warn(`Failed to fetch contract data for withdraw ${event.chainId}_${event.block.number}_${event.logIndex}: ${error}`);
-    // Use default values if contract calls fail
+  // Fetch vault data using the helper function - follows Envio's external calls pattern
+  const vaultData = await fetchVaultData(event.srcAddress, event.chainId, context);
+  
+  // Calculate before amounts safely - prevents negative values
+  const eventId = `${event.chainId}_${event.block.number}_${event.logIndex}`;
+  const beforeAmounts = calculateBeforeAmounts(
+    vaultData.totalAmount0,
+    vaultData.totalAmount1,
+    event.params.amount0,
+    event.params.amount1,
+    false, // isDeposit = false for withdrawals
+    context,
+    eventId
+  );
+  
+  if (vaultData.success) {
+    context.log.info(`Successfully fetched contract data for withdraw ${eventId} - sqrtPrice: ${vaultData.sqrtPrice.toString()}`);
   }
 
   // Create the event entity with enriched data
   const entity: VaultWithdraw = {
-    id: `${event.chainId}_${event.block.number}_${event.logIndex}`,
+    id: eventId,
     vault: event.srcAddress,
     sender: event.params.sender,
     to: event.params.to,
     shares: event.params.shares,
     amount0: event.params.amount0,
     amount1: event.params.amount1,
-    tick: tick,
-    sqrtPrice: sqrtPrice,
+    tick: vaultData.tick,
+    sqrtPrice: vaultData.sqrtPrice,
     createdAtTimestamp: BigInt(event.block.timestamp),
-    totalAmount0: totalAmount0,
-    totalAmount1: totalAmount1,
-    totalAmount0BeforeEvent: totalAmount0BeforeEvent,
-    totalAmount1BeforeEvent: totalAmount1BeforeEvent,
-    totalSupply: totalSupply,
+    totalAmount0: vaultData.totalAmount0,
+    totalAmount1: vaultData.totalAmount1,
+    totalAmount0BeforeEvent: beforeAmounts.totalAmount0BeforeEvent,
+    totalAmount1BeforeEvent: beforeAmounts.totalAmount1BeforeEvent,
+    totalSupply: vaultData.totalSupply,
   };
 
   context.VaultWithdraw.set(entity);
