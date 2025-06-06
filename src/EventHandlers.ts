@@ -123,54 +123,109 @@ ICHIVault.Deposit.handler(async ({ event, context }) => {
   let totalSupply = BigInt(0);
 
   try {
-    // Use ethers.js-style contract calls as Envio supports reading contract data
-    // Create provider and contract instances for making view function calls
-    const { ethers } = require('ethers');
+    // Import viem for contract calls
+    const { createPublicClient, http, getContract } = await import('viem');
+    const { mainnet } = await import('viem/chains');
     
-    // Assuming there's a provider available in context or we can create one
-    // For now, we'll use placeholder calls similar to how Sablier does it
-    
+    // Create a public client - you can add your own RPC endpoint here for better reliability
+    const client = createPublicClient({
+      chain: mainnet,
+      transport: http() // Uses the default public RPC endpoints
+    });
+
     // ICHIVault contract ABI for the view functions we need
     const vaultABI = [
-      "function currentTick() external view returns (int24)",
-      "function getTotalAmounts() external view returns (uint256 total0, uint256 total1)",
-      "function totalSupply() external view returns (uint256)",
-      "function pool() external view returns (address)"
-    ];
+      {
+        inputs: [],
+        name: "currentTick",
+        outputs: [{ internalType: "int24", name: "", type: "int24" }],
+        stateMutability: "view",
+        type: "function"
+      },
+      {
+        inputs: [],
+        name: "getTotalAmounts", 
+        outputs: [
+          { internalType: "uint256", name: "total0", type: "uint256" },
+          { internalType: "uint256", name: "total1", type: "uint256" }
+        ],
+        stateMutability: "view",
+        type: "function"
+      },
+      {
+        inputs: [],
+        name: "totalSupply",
+        outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+        stateMutability: "view",
+        type: "function"
+      },
+      {
+        inputs: [],
+        name: "pool",
+        outputs: [{ internalType: "address", name: "", type: "address" }],
+        stateMutability: "view",
+        type: "function"
+      }
+    ] as const;
     
     const poolABI = [
-      "function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)"
-    ];
+      {
+        inputs: [],
+        name: "slot0",
+        outputs: [
+          { internalType: "uint160", name: "sqrtPriceX96", type: "uint160" },
+          { internalType: "int24", name: "tick", type: "int24" },
+          { internalType: "uint16", name: "observationIndex", type: "uint16" },
+          { internalType: "uint16", name: "observationCardinality", type: "uint16" },
+          { internalType: "uint16", name: "observationCardinalityNext", type: "uint16" },
+          { internalType: "uint8", name: "feeProtocol", type: "uint8" },
+          { internalType: "bool", name: "unlocked", type: "bool" }
+        ],
+        stateMutability: "view",
+        type: "function"
+      }
+    ] as const;
 
-    // Note: In a real Envio implementation, you'd use the actual RPC endpoint from your config
-    // This is a conceptual implementation showing how contract calls would work
-    
+    // Get the vault contract
+    const vaultContract = getContract({
+      address: event.srcAddress as `0x${string}`,
+      abi: vaultABI,
+      client
+    });
+
     // Get current tick from vault
-    // tick = await vaultContract.currentTick();
+    tick = await vaultContract.read.currentTick();
     
     // Get total amounts from vault
-    // const totalAmounts = await vaultContract.getTotalAmounts();
-    // totalAmount0 = totalAmounts[0];
-    // totalAmount1 = totalAmounts[1];
+    const totalAmounts = await vaultContract.read.getTotalAmounts();
+    totalAmount0 = totalAmounts[0];
+    totalAmount1 = totalAmounts[1];
     
     // Get total supply
-    // totalSupply = await vaultContract.totalSupply();
+    totalSupply = await vaultContract.read.totalSupply();
     
     // Get pool address and fetch sqrtPrice
-    // const poolAddress = await vaultContract.pool();
-    // const poolContract = new ethers.Contract(poolAddress, poolABI, provider);
-    // const slot0 = await poolContract.slot0();
-    // sqrtPrice = slot0[0]; // sqrtPriceX96
+    const poolAddress = await vaultContract.read.pool();
+    const poolContract = getContract({
+      address: poolAddress,
+      abi: poolABI,
+      client
+    });
     
-    // Calculate before amounts
+    const slot0 = await poolContract.read.slot0();
+    sqrtPrice = slot0[0]; // sqrtPriceX96
+    
+    // Calculate before amounts using actual values
     totalAmount0BeforeEvent = totalAmount0 - event.params.amount0;
     totalAmount1BeforeEvent = totalAmount1 - event.params.amount1;
     
-    console.log(`Contract data fetched for deposit ${event.chainId}_${event.block.number}_${event.logIndex}`);
+    context.log.info(`Successfully fetched contract data for deposit ${event.chainId}_${event.block.number}_${event.logIndex} - sqrtPrice: ${sqrtPrice.toString()}`);
     
   } catch (error) {
-    console.warn(`Failed to fetch contract data for deposit ${event.chainId}_${event.block.number}_${event.logIndex}:`, error);
+    context.log.warn(`Failed to fetch contract data for deposit ${event.chainId}_${event.block.number}_${event.logIndex}: ${error}`);
     // Use default values if contract calls fail
+    totalAmount0BeforeEvent = totalAmount0 - event.params.amount0;
+    totalAmount1BeforeEvent = totalAmount1 - event.params.amount1;
   }
 
   // Create the event entity with enriched data
@@ -184,7 +239,7 @@ ICHIVault.Deposit.handler(async ({ event, context }) => {
     amount1: event.params.amount1,
     tick: tick,
     createdAtTimestamp: BigInt(event.block.timestamp),
-    sqrtPrice: sqrtPrice,
+    sqrtPrice: sqrtPrice, // Now fetched from actual contract call!
     totalAmount0: totalAmount0,
     totalAmount1: totalAmount1,
     totalAmount0BeforeEvent: totalAmount0BeforeEvent,
@@ -274,7 +329,7 @@ ICHIVault.Rebalance.handler(async ({ event, context }) => {
     console.log(`Contract data fetched for rebalance ${event.chainId}_${event.block.number}_${event.logIndex}`);
     
   } catch (error) {
-    console.warn(`Failed to fetch contract data for rebalance ${event.chainId}_${event.block.number}_${event.logIndex}:`, error);
+    context.log.warn(`Failed to fetch contract data for rebalance ${event.chainId}_${event.block.number}_${event.logIndex}: ${error}`);
     // Use default values if contract calls fail
   }
 
@@ -477,7 +532,7 @@ ICHIVault.Withdraw.handler(async ({ event, context }) => {
     console.log(`Contract data fetched for withdraw ${event.chainId}_${event.block.number}_${event.logIndex}`);
     
   } catch (error) {
-    console.warn(`Failed to fetch contract data for withdraw ${event.chainId}_${event.block.number}_${event.logIndex}:`, error);
+    context.log.warn(`Failed to fetch contract data for withdraw ${event.chainId}_${event.block.number}_${event.logIndex}: ${error}`);
     // Use default values if contract calls fail
   }
 
