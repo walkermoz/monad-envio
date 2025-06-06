@@ -53,7 +53,7 @@ function createViemClient(chainId: number) {
       break;
     case 8453:
       chain = base;
-      rpcUrl = 'https://mainnet.base.org'; // Base public RPC (Infura doesn't support Base)
+      rpcUrl = `https://base-mainnet.infura.io/v3/${INFURA_API_KEY}`;
       break;
     case 10:
       chain = optimism;
