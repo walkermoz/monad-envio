@@ -73,12 +73,13 @@ function createViemClient(chainId: number) {
 
 
 
-async function fetchVaultData(vaultAddress: string, chainId: number, context: any) {
+async function fetchVaultData(vaultAddress: string, chainId: number, blockNumber: bigint, context: any) {
   try {
     const client = createViemClient(chainId);
     
     const vaultResults = await client.multicall({
       allowFailure: false,
+      blockNumber: blockNumber,
       contracts: [
         {
           address: vaultAddress as `0x${string}`,
@@ -108,6 +109,7 @@ async function fetchVaultData(vaultAddress: string, chainId: number, context: an
     // Fetch pool data
     const poolResults = await client.multicall({
       allowFailure: false,
+      blockNumber: blockNumber,
       contracts: [
         {
           address: poolAddress as `0x${string}`,
@@ -269,7 +271,7 @@ ICHIVault.DeployICHIVault.handler(async ({ event, context }) => {
 
 ICHIVault.Deposit.handler(async ({ event, context }) => {
   // Fetch vault data using the helper function - follows Envio's external calls pattern
-  const vaultData = await fetchVaultData(event.srcAddress, event.chainId, context);
+  const vaultData = await fetchVaultData(event.srcAddress, event.chainId, BigInt(event.block.number), context);
   
   // Calculate before amounts safely - prevents negative values
   const eventId = `${event.chainId}_${event.block.number}_${event.logIndex}`;
@@ -356,7 +358,7 @@ ICHIVault.OwnershipTransferred.handler(async ({ event, context }) => {
 
 ICHIVault.Rebalance.handler(async ({ event, context }) => {
   // Fetch vault data using the helper function - follows Envio's external calls pattern
-  const vaultData = await fetchVaultData(event.srcAddress, event.chainId, context);
+  const vaultData = await fetchVaultData(event.srcAddress, event.chainId, BigInt(event.block.number), context);
   
   if (vaultData.success) {
     context.log.info(`Successfully fetched contract data for rebalance ${event.chainId}_${event.block.number}_${event.logIndex} - sqrtPrice: ${vaultData.sqrtPrice.toString()}`);
@@ -508,7 +510,7 @@ ICHIVault.Transfer.handler(async ({ event, context }) => {
 
 ICHIVault.Withdraw.handler(async ({ event, context }) => {
   // Fetch vault data using the helper function - follows Envio's external calls pattern
-  const vaultData = await fetchVaultData(event.srcAddress, event.chainId, context);
+  const vaultData = await fetchVaultData(event.srcAddress, event.chainId, BigInt(event.block.number), context);
   
   // Calculate before amounts safely - prevents negative values
   const eventId = `${event.chainId}_${event.block.number}_${event.logIndex}`;
