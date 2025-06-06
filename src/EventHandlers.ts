@@ -120,11 +120,11 @@ async function fetchVaultData(vaultAddress: string, chainId: number, context: an
     const [slot0] = poolResults;
     
     return {
-      tick: Number(tick.result),
-      totalAmount0: (totalAmounts.result as [bigint, bigint])[0],
-      totalAmount1: (totalAmounts.result as [bigint, bigint])[1],
-      totalSupply: totalSupply.result as bigint,
-      sqrtPrice: (slot0.result as unknown as [bigint])[0], // sqrtPriceX96
+      tick: Number(tick),
+      totalAmount0: (totalAmounts as [bigint, bigint])[0],
+      totalAmount1: (totalAmounts as [bigint, bigint])[1],
+      totalSupply: totalSupply as bigint,
+      sqrtPrice: (slot0 as unknown as [bigint])[0], // sqrtPriceX96
       success: true
     };
   } catch (error) {
