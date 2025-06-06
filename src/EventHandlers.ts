@@ -34,69 +34,97 @@ import { VAULT_ABI, POOL_ABI } from './abis';
 
 // Create public client helper - following Envio's external calls pattern
 function createViemClient(chainId: number) {
+  const INFURA_API_KEY = '4798af18ca8244b78f03456b5d69823d';
   let chain;
+  let rpcUrl;
+  
   switch (chainId) {
     case 1:
       chain = mainnet;
+      rpcUrl = `https://mainnet.infura.io/v3/${INFURA_API_KEY}`;
       break;
     case 137:
       chain = polygon;
+      rpcUrl = `https://polygon-mainnet.infura.io/v3/${INFURA_API_KEY}`;
       break;
     case 42161:
       chain = arbitrum;
+      rpcUrl = `https://arbitrum-mainnet.infura.io/v3/${INFURA_API_KEY}`;
       break;
     case 8453:
       chain = base;
+      rpcUrl = 'https://mainnet.base.org'; // Base public RPC (Infura doesn't support Base)
       break;
     case 10:
       chain = optimism;
+      rpcUrl = `https://optimism-mainnet.infura.io/v3/${INFURA_API_KEY}`;
       break;
     default:
-      chain = mainnet; // fallback
+      chain = mainnet;
+      rpcUrl = `https://mainnet.infura.io/v3/${INFURA_API_KEY}`; // fallback
   }
   
   return createPublicClient({
     chain,
-    transport: http() // Uses default public RPC endpoints - add custom RPC for production
+    transport: http(rpcUrl),
+    batch: { multicall: true }
   });
 }
 
 
 
-// Helper function for fetching vault data - following Envio's external calls pattern
 async function fetchVaultData(vaultAddress: string, chainId: number, context: any) {
   try {
     const client = createViemClient(chainId);
     
-    const vaultContract = getContract({
-      address: vaultAddress as `0x${string}`,
-      abi: VAULT_ABI,
-      client
+    const vaultResults = await client.multicall({
+      allowFailure: false,
+      contracts: [
+        {
+          address: vaultAddress as `0x${string}`,
+          abi: VAULT_ABI,
+          functionName: 'currentTick'
+        },
+        {
+          address: vaultAddress as `0x${string}`,
+          abi: VAULT_ABI,
+          functionName: 'getTotalAmounts'
+        },
+        {
+          address: vaultAddress as `0x${string}`,
+          abi: VAULT_ABI,
+          functionName: 'totalSupply'
+        },
+        {
+          address: vaultAddress as `0x${string}`,
+          abi: VAULT_ABI,
+          functionName: 'pool'
+        }
+      ]
     });
 
-    // Fetch vault data
-    const [tick, totalAmounts, totalSupply, poolAddress] = await Promise.all([
-      vaultContract.read.currentTick(),
-      vaultContract.read.getTotalAmounts(),
-      vaultContract.read.totalSupply(),
-      vaultContract.read.pool()
-    ]);
+    const [tick, totalAmounts, totalSupply, poolAddress] = vaultResults;
 
     // Fetch pool data
-    const poolContract = getContract({
-      address: poolAddress,
-      abi: POOL_ABI,
-      client
+    const poolResults = await client.multicall({
+      allowFailure: false,
+      contracts: [
+        {
+          address: poolAddress.result as `0x${string}`,
+          abi: POOL_ABI,
+          functionName: 'slot0'
+        }
+      ]
     });
-    
-    const slot0 = await poolContract.read.slot0();
+
+    const [slot0] = poolResults;
     
     return {
-      tick: Number(tick),
-      totalAmount0: totalAmounts[0],
-      totalAmount1: totalAmounts[1],
-      totalSupply,
-      sqrtPrice: slot0[0], // sqrtPriceX96
+      tick: Number(tick.result),
+      totalAmount0: (totalAmounts.result as [bigint, bigint])[0],
+      totalAmount1: (totalAmounts.result as [bigint, bigint])[1],
+      totalSupply: totalSupply.result as bigint,
+      sqrtPrice: (slot0.result as any[])[0], // sqrtPriceX96
       success: true
     };
   } catch (error) {
