@@ -120,11 +120,11 @@ async function fetchVaultData(vaultAddress: string, chainId: number, context: an
     const [slot0] = poolResults;
     
     return {
-      tick: Number(tick),
-      totalAmount0: (totalAmounts as [bigint, bigint])[0],
-      totalAmount1: (totalAmounts as [bigint, bigint])[1],
-      totalSupply: totalSupply as bigint,
-      sqrtPrice: (slot0 as any[])[0], // sqrtPriceX96
+      tick: Number(tick.result),
+      totalAmount0: (totalAmounts.result as [bigint, bigint])[0],
+      totalAmount1: (totalAmounts.result as [bigint, bigint])[1],
+      totalSupply: totalSupply.result as bigint,
+      sqrtPrice: (slot0.result as unknown as [bigint])[0], // sqrtPriceX96
       success: true
     };
   } catch (error) {
@@ -430,8 +430,7 @@ ICHIVault.Transfer.handler(async ({ event, context }) => {
   if (event.params.from !== ADDRESS_ZERO && event.params.from !== ichiVaultId) {
     const fromUserVaultShare = await createVaultShare(event.srcAddress, event.params.from, context);
     if (!fromUserVaultShare) {
-      context.log.error("fromUserVaultShare is null/undefined for vault:", event.srcAddress, "user:", event.params.from);
-      context.log.error("Skipping from user balance update");
+      context.log.error(`fromUserVaultShare is null/undefined for vault: ${event.srcAddress}, user: ${event.params.from}. Skipping from user balance update`);
     } else {
       const wasHolder = BigInt(fromUserVaultShare.vaultShareBalance) !== ZERO_BD;
       fromUserVaultShare.vaultShareBalance = BigInt(fromUserVaultShare.vaultShareBalance) - BigInt(value);
@@ -447,8 +446,7 @@ ICHIVault.Transfer.handler(async ({ event, context }) => {
   if (event.params.to !== ADDRESS_ZERO && event.params.to !== ichiVaultId) {
     const toUserVaultShare = await createVaultShare(event.srcAddress, event.params.to, context);
     if (!toUserVaultShare) {
-      context.log.error("toUserVaultShare is null/undefined for vault:", event.srcAddress, "user:", event.params.to);
-      context.log.error("Skipping to user balance update");
+      context.log.error(`toUserVaultShare is null/undefined for vault: ${event.srcAddress}, user: ${event.params.to}. Skipping to user balance update`);
     } else {
       const wasHolder = BigInt(toUserVaultShare.vaultShareBalance) !== ZERO_BD;
       toUserVaultShare.vaultShareBalance = BigInt(toUserVaultShare.vaultShareBalance) + BigInt(value);
